@@ -1,6 +1,6 @@
 import requests, csv, ast, os, re, json
 import pandas as pd
-from pandas import DataFrame
+from datetime import datetime
 
 # Temporal objects
 
@@ -200,7 +200,8 @@ def fixPhoneNumber(phone, country):
     Returns:
       str: The formatted phone number, including the country's dialing code.
     """
-
+    phone = str(phone)
+    country = str(country)
     # Remove non-numeric characters from the phone number
     phone = re.sub(r'[^0-9]', '', phone)
     
@@ -228,65 +229,91 @@ def fixPhoneNumber(phone, country):
 
     return new_phone
 
-def formatDate(register):
+def formatDateTime(date):
     """
-    Formats a date string by removing hyphens and converting it to an integer.
+    Formats a ISO8601 datetime to Python TimeStamp format.
 
     Args:
-      register (str): The date string to be formatted.
-
+      register (str or timestamp): The date string to be formatted.
+        Example: 2023-05-15T02:39:02.021Z
     Returns:
-      int: The formatted date as an integer.
-        Example: 20240217
+      datetime: The formatted date as an timestamp.
+        Example: 2023-05-15 02:39:02.002
     """
-    # Convert the input to string to ensure consistency
-    register = str(register)
-    
-    # Extract the first 10 characters, replace hyphens, and convert to an integer
-    formatted_date = int(register[:10].replace('-', ''))
-
-    return formatted_date
+    # Verifiying if date is a string and converting it
+    if isinstance(date, str):
+        try:
+            return datetime.fromisoformat(date[:-1])
+        except ValueError:
+            # If any error returns None
+            return None
+    elif isinstance(date, pd.Timestamp):
+        # If it is already Timestamp, returns original date
+        return date
+    else:
+        # If data type is not str or Timestamp, returns None
+        return None
 
 def duplicatesManagement(df):
     """
-    Manages duplicate records in a DataFrame based on the 'email' column.
+    Merge information from duplicate records in a DataFrame based on email.
 
     Args:
-      df (pandas.DataFrame): The DataFrame to process.
+        df (pandas.DataFrame): DataFrame containing contact information.
 
     Returns:
-      pandas.DataFrame: The DataFrame without duplicate records based on the 'email' column,
-                       keeping the first occurrence.
+        pandas.DataFrame: DataFrame with merged information from duplicate records based on email.
     """
+    # Sort by 'createdate' in descending order
+    df = df.sort_values(by='createdate', ascending=False)
 
-    # Sort by 'original_create_date' in ascending order
-    df.sort_values(by='createdate', ascending=False, inplace=True)
+    # Identify duplicate records based on 'email'
+    duplicates = df[df.duplicated(subset='email', keep=False)]
+
+    # Create unique emails from duplicates
+    unique_emails = duplicates['email'].drop_duplicates()
+
+    # Drop duplicates from df
+    df = df.drop_duplicates(subset='email', keep='first')
+
+    # Iterate over the duplicate records and merge the information
+    for email in unique_emails:
     
-    # Drop duplicates based on the 'email' column, keeping the first occurrence
-    df = df.drop_duplicates(subset=['email'], keep='first')
+        # Filter duplicate records for the current email
+        duplicates_for_email = duplicates[duplicates['email'] == email]
 
-    # # Identify duplicate records based on 'email'
-    # duplicates = df[df.duplicated(subset=['email'], keep=False)]
+        # Get the index of the first duplicate record
+        index = df[df['email'] == email].index[0]
 
-    # # Iterate over duplicate records and merge information
-    # for _, group in duplicates.groupby(['email']):
-    #     # Get the index of the most recent record
-    #     newer_register = group.idxmax()['createdate']
-
-    #     # Merge information from all rows into the most recent one
-    #     for i in group.index:
-    #         if i != newer_register:
-    #             for col in df.columns:
-    #                 if pd.isna(df.loc[newer_register, col]) and not pd.isna(df.loc[i, col]):
-    #                     df.loc[newer_register, col] = df.loc[i, col]
-
-    #         df.loc[newer_register, 'Industry'] += ';' + df.loc[i, 'Industry'].split(';')
-
-    # # Drop duplicate records
-    # df.drop(group.index, inplace=True)
-
-    # # Remove ';' at the beginning of the 'Industry' column
-    # df['Industry'] = df['Industry'].str.lstrip(';')
+        counter = 0
+        for each in duplicates_for_email.index:
+            # Only if the emails are equal in df and duplicates_for_email, try to update
+            # Update the address if necessary
+            if df.loc[index, 'address'] is None and duplicates_for_email.loc[each, 'address'] is not None:
+                df.loc[index, 'address'] = duplicates_for_email.loc[each, 'address']
+            
+            # Update the country if necessary
+            if df.loc[index, 'country'] is None and duplicates_for_email.loc[each, 'country'] is not None:
+                df.loc[index, 'country'] = duplicates_for_email.loc[each, 'country']
+            
+            # Update the city if necessary
+            if df.loc[index, 'city'] is None and duplicates_for_email.loc[each, 'city'] is not None:
+                df.loc[index, 'city'] = duplicates_for_email.loc[each, 'city']
+            
+            # Update the phone if necessary
+            if df.loc[index, 'phone'] is None and duplicates_for_email.loc[each, 'phone'] is not None:
+                df.loc[index, 'phone'] = duplicates_for_email.loc[each, 'phone']
+            
+            # Update the original industry if necessary
+            if duplicates_for_email.loc[each, 'original_industry'] not in df.loc[index, 'original_industry']:
+                df.loc[index, 'original_industry'] += ';' + duplicates_for_email.loc[each, 'original_industry']
+                counter += 1
+        
+        if counter != 0:
+            # Add ';' at the beginning
+            df.loc[index, 'original_industry'] = ';' + df.loc[index, 'original_industry']
+        # Remove possible repetitions of ';'
+        df.loc[index, 'original_industry'] = df.loc[index, 'original_industry'].replace(';;', ';')
 
     return df
 
