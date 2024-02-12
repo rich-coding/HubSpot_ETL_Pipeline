@@ -179,7 +179,7 @@ def findEmail(register):
     Returns:
       str: The first email address found in the text, or an empty string if none is found.
     """
-
+    register = str(register)
     # Regular expression pattern to search for email addresses
     email_chain = r'\b[A-Za-z0-9._-]+@[A-Za-z0-9.-]+\.[A-Za-z0-9.-]{2,}\b'
 
@@ -256,7 +256,7 @@ def formatDateTime(date):
 
 def duplicatesManagement(df):
     """
-    Merge information from duplicate records in a DataFrame based on email.
+    Merge information from duplicate records in a DataFrame based on email and fullname.
 
     Args:
         df (pandas.DataFrame): DataFrame containing contact information.
@@ -267,54 +267,89 @@ def duplicatesManagement(df):
     # Sort by 'createdate' in descending order
     df = df.sort_values(by='createdate', ascending=False)
 
+    # Create the 'fullname' column by concatenating 'firstname' and 'lastname'
+    df['fullname'] = df['firstname'] + ' ' + df['lastname']
+    
     # Identify duplicate records based on 'email'
-    duplicates = df[df.duplicated(subset='email', keep=False)]
+    duplicatesEmail = df[df.duplicated(subset='email', keep=False)]
+    # Cleaning duplicatesEmail
+    duplicatesEmail = duplicatesEmail.dropna(subset='email')
+
+    # Identify duplicate records based on 'fullname'
+    duplicatesFullname = df[df.duplicated(subset='fullname', keep=False)]
+    # Cleaning duplicatesFullname
+    duplicatesFullname = duplicatesFullname.dropna(subset='fullname')
 
     # Create unique emails from duplicates
-    unique_emails = duplicates['email'].drop_duplicates()
+    unique_emails = duplicatesEmail['email'].drop_duplicates()
+    # Create unique emails from duplicates
+    unique_names = duplicatesFullname['fullname'].drop_duplicates()
 
-    # Drop duplicates from df
-    df = df.drop_duplicates(subset='email', keep='first')
+    # Changing NaN for None values into DataFrame
+    df = df.where(pd.notna(df), None)
 
-    # Iterate over the duplicate records and merge the information
+    # Iterate over the duplicate records and merge the information by email
     for email in unique_emails:
-    
+
         # Filter duplicate records for the current email
-        duplicates_for_email = duplicates[duplicates['email'] == email]
+        duplicates_for_email = duplicatesEmail[duplicatesEmail['email'] == email]
 
         # Get the index of the first duplicate record
         index = df[df['email'] == email].index[0]
 
+        # Merge the information from duplicate records into the first record
+        for col in ['fullname', 'address', 'country', 'city', 'phone']:
+            if df.loc[index, col] is None and not duplicates_for_email[col].dropna().empty:
+                    df.loc[index, col] = duplicates_for_email[col].dropna().iloc[0]
+            
+        # Update the original industry if necessary
         counter = 0
-        for each in duplicates_for_email.index:
-            # Only if the emails are equal in df and duplicates_for_email, try to update
-            # Update the address if necessary
-            if df.loc[index, 'address'] is None and duplicates_for_email.loc[each, 'address'] is not None:
-                df.loc[index, 'address'] = duplicates_for_email.loc[each, 'address']
-            
-            # Update the country if necessary
-            if df.loc[index, 'country'] is None and duplicates_for_email.loc[each, 'country'] is not None:
-                df.loc[index, 'country'] = duplicates_for_email.loc[each, 'country']
-            
-            # Update the city if necessary
-            if df.loc[index, 'city'] is None and duplicates_for_email.loc[each, 'city'] is not None:
-                df.loc[index, 'city'] = duplicates_for_email.loc[each, 'city']
-            
-            # Update the phone if necessary
-            if df.loc[index, 'phone'] is None and duplicates_for_email.loc[each, 'phone'] is not None:
-                df.loc[index, 'phone'] = duplicates_for_email.loc[each, 'phone']
-            
-            # Update the original industry if necessary
-            if duplicates_for_email.loc[each, 'original_industry'] not in df.loc[index, 'original_industry']:
-                df.loc[index, 'original_industry'] += ';' + duplicates_for_email.loc[each, 'original_industry']
+        for industry in duplicates_for_email['original_industry'].dropna():
+            if industry not in df.loc[index, 'original_industry']:
+                df.loc[index, 'original_industry'] += ';' + industry
                 counter += 1
-        
         if counter != 0:
             # Add ';' at the beginning
-            df.loc[index, 'original_industry'] = ';' + df.loc[index, 'original_industry']
+            df.loc[index, 'original_industry'] = ';' + df.loc[index, 'original_industry']    
         # Remove possible repetitions of ';'
         df.loc[index, 'original_industry'] = df.loc[index, 'original_industry'].replace(';;', ';')
+   
+   # Iterate over the duplicate records and merge the information by fullname
+    for fullname in unique_names:
 
+        # Filter duplicate records for the current email
+        duplicates_for_name = duplicatesFullname[duplicatesFullname['fullname'] == fullname]
+
+        # Get the index of the first duplicate record
+        index = df[df['fullname'] == fullname].index[0]
+
+        # Merge the information from duplicate records into the first record
+        for col in ['email', 'address', 'country', 'city', 'phone']:
+            if df.loc[index, col] is None and not duplicates_for_name[col].dropna().empty:
+                df.loc[index, col] = duplicates_for_name[col].dropna().iloc[0]
+        # Update the original industry if necessary
+        counter = 0
+        for industry in duplicates_for_name['original_industry'].dropna():
+            if industry not in df.loc[index, 'original_industry']:
+                df.loc[index, 'original_industry'] += ';' + industry
+                counter += 1
+        if counter != 0:
+            # Add ';' at the beginning
+            df.loc[index, 'original_industry'] = ';' + df.loc[index, 'original_industry']    
+        # Remove possible repetitions of ';'
+        df.loc[index, 'original_industry'] = df.loc[index, 'original_industry'].replace(';;', ';')
+    
+    # Drop duplicates from df by email
+    df.drop_duplicates(subset='email', inplace=True)
+
+    # Sorting registers by fullname and original_industry
+    df.sort_values(by=['fullname', 'original_industry'])
+    # Drop duplicates from df by fullname
+    df.drop_duplicates(subset='fullname', inplace=True)
+
+    # Reseting index for df
+    df = df.reset_index(drop=True)
+    
     return df
 
 def uploadContacts(token, df_contacts, batch_size=100):
@@ -354,6 +389,7 @@ def uploadContacts(token, df_contacts, batch_size=100):
             phone = row['phone']
             original_industry = row.get('original_industry', None)  # Using .get() to handle missing column
             city = row['city']
+            fullname = row['fullname']
             original_create_date = row['original_create_date']
 
             # Create the JSON payload with the required structure
@@ -366,6 +402,7 @@ def uploadContacts(token, df_contacts, batch_size=100):
                     "phone": phone,
                     "original_industry": original_industry,
                     "city": city,
+                    "fullname": fullname,
                     "original_create_date": original_create_date,
                 }
             }
